@@ -97,26 +97,24 @@ function extractReturnType(node: ts.FunctionDeclaration, sourceFile: ts.SourceFi
  * @param dir The directory to scan.
  * @param functions A Set to track unique functions found.
  */
-async function scanDirectory(dir: string, functions: Set<FunctionData>): Promise<void> {
+async function scanJSTSDir(dir: string, functions: Set<FunctionData>): Promise<void> {
   const files = await fs.readdir(dir);
 
   // skip patterned dirs which dont need to be documented
   const skipDirs = ['node_modules', '.git', 'dist', 'build', 'coverage', 'logs', 'tmp', 'temp', '.vscode', '.idea'];
-  const skipFilePatterns = [/\.js$/, /\.jsx$/, /\.d\.ts$/, /\.spec\.ts$/, /\.test\.ts$/];
-
+  const skipFilePatterns = [
+    /(\.spec.|\.test.)\./i
+  ];
   await Promise.all(files.map(async (file) => {
     const fullPath = path.join(dir, file);
     const stat = await fs.stat(fullPath);
 
     if (stat.isDirectory()) {
       if (skipDirs.includes(file)) return;
-      await scanDirectory(fullPath, functions);
+      await scanJSTSDir(fullPath, functions);
     } else {
       if (skipFilePatterns.some(pattern => pattern.test(file))) return;
-
-      if (file.endsWith('.ts') || file.endsWith('.tsx')) {
-        await scanFile(fullPath, functions);
-      }
+      await scanFile(fullPath, functions);
     }
   }));
 }
@@ -190,6 +188,8 @@ async function scanFile(filePath: string, functions: Set<FunctionData>): Promise
   });
 }
 
+
+/* FIXME: Need to dynamically import and instantiate the scan parser depending on what lang is detected, so remove scanJSTSDir from getFunctionData and then pass it through param */
 /**
  * Main function to scan the codebase and return unique function data.
  * 
@@ -198,7 +198,7 @@ async function scanFile(filePath: string, functions: Set<FunctionData>): Promise
  */
 export async function getFunctionData(baseDir: string): Promise<FunctionData[]> {
   const functions = new Set<FunctionData>();
-  await scanDirectory(baseDir, functions);
+  await scanJSTSDir(baseDir, functions);
   return Array.from(functions);
 }
 
