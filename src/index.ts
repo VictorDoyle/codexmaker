@@ -27,11 +27,8 @@ async function main() {
     console.log('No functions found in the codebase. Documentation generation aborted.');
     return;
   }
-
   await generateDocs(functionData, targetDir);
   await setupNextra(targetDir);
-
-  console.log(`Documentation successfully generated in ${targetDir}`);
 }
 
 main().catch(error => {

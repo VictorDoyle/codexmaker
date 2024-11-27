@@ -1,14 +1,42 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { execSync } from 'child_process';
+import inquirer from 'inquirer';
 
-interface MetaPage {
-  title: string;
-  type: 'page';
-  href?: string;
-  newWindow?: boolean;
+
+process.on('SIGINT', () => {
+  console.log('\nProcess interrupted. Exiting...');
+  process.exit(1);
+});
+
+async function promptForProjectName() {
+  const answers = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'projectName',
+      message: 'Enter the GitHub Project Name: (this will autofill links to your github, logo, etc)',
+      default: path.basename(process.cwd()),
+    },
+  ]);
+
+  return answers.projectName;
 }
 
+async function promptForGithubUsername() {
+  const answers = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'githubUsername',
+      message: 'Enter your GitHub username: (this will be used for github links)',
+      default: 'yourusername',
+    },
+  ]);
+
+  return answers.githubUsername;
+}
+
+
+// FIXME: Todo in v2
 async function checkDependencies(outputDir: string) {
   const requiredPackages = [
     'next', 'react', 'react-dom', 'nextra', 'nextra-theme-docs', 'typescript', '@types/node'
@@ -17,9 +45,8 @@ async function checkDependencies(outputDir: string) {
 
   // make basic package.json if none found
   if (!await fs.pathExists(packageJsonPath)) {
-    const projectName = path.basename(process.cwd());
     const packageJsonContent = {
-      name: `${projectName}-docs`,
+      name: `${path.basename(process.cwd())}-docs`,
       version: '1.0.0',
       private: true,
       scripts: {
@@ -69,7 +96,9 @@ async function checkDependencies(outputDir: string) {
     console.log('All required dependencies are already installed.');
   }
 }
-async function generateNextraConfig(outputDir: string, functionData: any[]) {
+
+
+async function generateNextraConfig(outputDir: string, functionData: any[], projectName: string, githubUsername: string) {
   const pagesDir = path.join(outputDir, 'pages');
   const publicDir = path.join(outputDir, 'public');
   const nextConfigPath = path.join(outputDir, 'next.config.mjs');
@@ -92,40 +121,24 @@ async function generateNextraConfig(outputDir: string, functionData: any[]) {
   const functionsDir = path.join(pagesDir, 'functions');
   await fs.ensureDir(functionsDir);
 
-  // need this for dynamic sidebar build
-  const meta: Record<string, MetaPage | Record<string, MetaPage>> = {
-    index: {
-      title: 'Overview',
-      type: 'page'
-    },
-    functions: {} // init nested Record<string, MetaPage>
-  };
-
   // TODO: Clearup index page
-  const indexMdx = `# Project Documentation
+  const indexMdx = `# ${projectName}
 
-Welcome to the comprehensive project documentation. 
+Welcome to the Documentation Website for ${projectName}. 
 
 ## Quick Overview
-This documentation provides a detailed reference for all functions in the project. 
-
-### Navigation
-- Use the sidebar to explore different functions
-- Each function has its own detailed documentation page
+This documentation provides a detailed reference for all functions in the entire codebase.
 
 ## Getting Started
-Browse through the available functions in the sidebar.
+- Use the sidebar to explore different functions
+- Each function has its own detailed documentation page
+- The website is fully indexed and searchable
+
+## Customizing it to your liking
+- If you need to modify themes, you can
+- When regenerating the documentation, pre-existing files will not be modified or removed.
 `;
   await fs.writeFile(path.join(pagesDir, 'index.mdx'), indexMdx);
-
-  // FIXME: MDX Parsing issues with non escaped chars - look into this
-  function escapeCodeBlock(code: string): string {
-    return code
-      .replace(/\{/g, '&#123;')  // Escape opening curly brace
-      .replace(/\}/g, '&#125;')  // Escape closing curly brace
-      .replace(/</g, '&lt;')     // Escape angle brackets
-      .replace(/>/g, '&gt;');    // Escape angle brackets
-  }
 
   // gen MDX pages for each function
   for (const functionInfo of functionData) {
@@ -140,38 +153,35 @@ Browse through the available functions in the sidebar.
 ${description || 'No description provided.'}
 
 ## Function Code
-\`\`\`javascript
-${escapeCodeBlock(code)}
-\`\`\`
+<pre><code>
+\`\`\`ts showLineNumbers
+  ${code}
+  \`\`\`
+</code></pre>
+
 
 ### Parameters
+\`\`\`
 ${parameters && parameters.length > 0
         ? parameters.map((param: { name: string; type: string; description: string }) => `- \`${param.name}\`: ${param.type} - ${param.description}`).join('\n')
         : 'No parameters specified.'}
+\`\`\`
 
 ### Return Value
-- Type: ${returnType || 'Unknown'}
+
+- Type: \`\`\`${returnType || 'Unknown'} \`\`\`
+
 ${description || 'No additional return value description available.'}
 
 ### Usage Example
 \`\`\`javascript
-// TODO: Add an example of how to use this function
+Add an example of how to use this function
 \`\`\`
     `;
 
     const mdxFilePath = path.join(functionsDir, `${name}.mdx`);
     await fs.writeFile(mdxFilePath, mdxContent);
-
-    //add to sidebar
-    (meta.functions as Record<string, MetaPage>)[name] = {
-      title: functionTitle,
-      type: 'page'
-    };
   }
-
-  // _meta.json for sidebar nav
-  const metaContent = JSON.stringify(meta, null, 2);
-  await fs.writeFile(path.join(pagesDir, '_meta.json'), metaContent);
 
   const themeConfigPath = path.join(outputDir, 'theme.config.tsx');
   const themeConfigContent = `
@@ -179,21 +189,19 @@ import React from 'react'
 import { DocsThemeConfig } from 'nextra-theme-docs'
 
 const config: DocsThemeConfig = {
-  logo: <span>Project Documentation</span>,
+  logo: <span>${projectName}</span>,
   project: {
-    link: 'https://github.com/yourusername/your-project',
+    link: 'https://github.com/${githubUsername}/${projectName}',
   },
-  docsRepositoryBase: 'https://github.com/yourusername/your-project/blob/main/docs',
+  docsRepositoryBase: 'https://github.com/${githubUsername}/${projectName}/blob/main/docs',
   sidebar: {
-    defaultMenuCollapseLevel: 1,
+    defaultMenuCollapseLevel: 2,
     toggleButton: true,
+    autoCollapse: true,
     titleComponent: ({ title }) => <>{title}</>
   },
   footer: {
-    text: 'MIT 2024 © Your Name',
-  },
-  search: {
-    component: null
+    text: 'MIT 2024 © ${projectName}',
   },
   navigation: {
     prev: true,
@@ -211,9 +219,10 @@ export default config
 }
 //TODO: Fix this up and cleanup
 async function generateDocs(functionData: any[], outputDir: string): Promise<void> {
+  const projectName = await promptForProjectName();
+  const githubUsername = await promptForGithubUsername();
   await checkDependencies(outputDir);
-
-  await generateNextraConfig(outputDir, functionData);
+  await generateNextraConfig(outputDir, functionData, projectName, githubUsername);
 
   console.log('Installing dependencies...');
   execSync('npm install', { cwd: outputDir, stdio: 'inherit' });

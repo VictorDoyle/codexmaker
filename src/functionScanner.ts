@@ -84,7 +84,8 @@ function extractParameters(node: ts.FunctionDeclaration, sourceFile: ts.SourceFi
  */
 function extractReturnType(node: ts.FunctionDeclaration, sourceFile: ts.SourceFile): string {
   if (node.type) {
-    return node.type.getText(sourceFile);
+    const returnType = node.type.getText(sourceFile);
+    return returnType === 'void' ? 'void' : returnType;  // 'void' parsed as string, not JSX or else itl break rendering in .mdx files
   }
   return 'void';
 }
