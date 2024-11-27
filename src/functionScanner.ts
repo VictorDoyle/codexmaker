@@ -5,6 +5,7 @@ import ts from 'typescript';
 interface FunctionData {
   name: string;
   code: string;
+  codeLang: string;
   filePath: string;
   description?: string;
   parameters?: Array<{
@@ -121,6 +122,43 @@ async function scanDirectory(dir: string, functions: Set<FunctionData>): Promise
 }
 
 /**
+ * Determines the programming language based on the file extension.
+ * 
+ * This function maps file extensions to their corresponding language identifiers
+ * which are commonly used for syntax highlighting in code editors or markdown renderers.
+ * If the file extension is not found in the predefined map, it returns 'text' as a fallback.
+ * 
+ * @param {string} filePath - The file path or name to extract the extension from.
+ * @returns {string} - A language identifier (e.g., 'ts', 'js', 'python', etc.) based on the file extension.
+ * If the extension is not recognized, it returns 'text'.
+ */
+function getCodeLanguage(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+
+  const langMap: { [key: string]: string } = {
+    '.ts': 'ts',
+    '.tsx': 'tsx',
+    '.js': 'js',
+    '.jsx': 'jsx',
+    '.html': 'html',
+    '.css': 'css',
+    '.json': 'json',
+    '.python': 'python',
+    '.java': 'java',
+    '.cpp': 'cpp',
+    '.go': 'go',
+    '.ruby': 'ruby',
+    '.php': 'php',
+    '.yaml': 'yaml',
+    '.bash': 'bash',
+    '.sh': 'bash',
+    '.md': 'markdown',
+  };
+
+  return langMap[ext] || 'text';
+}
+
+/**
  * Parses a TypeScript file and extracts function declarations.
  * 
  * @param filePath The path to the TypeScript file.
@@ -141,6 +179,7 @@ async function scanFile(filePath: string, functions: Set<FunctionData>): Promise
         name: node.name.getText(sourceFile),
         code: functionCode,
         filePath,
+        codeLang: getCodeLanguage(filePath),
         description: extractJSDocComment(node, sourceFile),
         parameters: extractParameters(node, sourceFile),
         returnType: extractReturnType(node, sourceFile)

@@ -142,7 +142,7 @@ This documentation provides a detailed reference for all functions in the entire
 
   // gen MDX pages for each function
   for (const functionInfo of functionData) {
-    const { name, code, description, parameters, returnType } = functionInfo;
+    const { name, code, codeLang, description, parameters, returnType } = functionInfo;
 
     const functionTitle = name.charAt(0).toUpperCase() + name.slice(1);
 
@@ -154,7 +154,8 @@ ${description || 'No description provided.'}
 
 ## Function Code
 <pre><code>
-\`\`\`ts showLineNumbers
+  this is a ${codeLang} lang file
+\`\`\`${codeLang} showLineNumbers
   ${code}
   \`\`\`
 </code></pre>
