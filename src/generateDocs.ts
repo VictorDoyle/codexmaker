@@ -72,7 +72,20 @@ async function checkDependencies(outputDir: string) {
 async function generateNextraConfig(outputDir: string, functionData: any[]) {
   const pagesDir = path.join(outputDir, 'pages');
   const publicDir = path.join(outputDir, 'public');
+  const nextConfigPath = path.join(outputDir, 'next.config.mjs');
 
+  // genereate next.config file
+  const nextConfigContent = `
+  import nextra from 'nextra'
+
+  const withNextra = nextra({
+    theme: 'nextra-theme-docs',
+    themeConfig: './theme.config.tsx',
+  })
+
+  export default withNextra()
+    `;
+  await fs.writeFile(nextConfigPath, nextConfigContent);
   await fs.ensureDir(pagesDir);
   await fs.ensureDir(publicDir);
 
@@ -196,7 +209,6 @@ export default config
   `;
   await fs.writeFile(themeConfigPath, themeConfigContent);
 }
-
 //TODO: Fix this up and cleanup
 async function generateDocs(functionData: any[], outputDir: string): Promise<void> {
   await checkDependencies(outputDir);
