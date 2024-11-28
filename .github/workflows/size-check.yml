@@ -1,0 +1,198 @@
+name: Check Project Size Before and After PR
+
+on:
+  pull_request:
+    paths:
+      - "**/*"
+
+permissions:
+  pull-requests: write
+
+jobs:
+  size-tracker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Calculate Size Changes
+        id: size-changes
+        run: |
+          # Function to format file size
+          format_size() {
+            local size=$1
+            if [ $size -ge 1073741824 ]; then
+              echo "$(($size/1073741824))GB"
+            elif [ $size -ge 1048576 ]; then
+              echo "$(($size/1048576))MB"
+            elif [ $size -ge 1024 ]; then
+              echo "$(($size/1024))KB"
+            else
+              echo "${size}B"
+            fi
+          }
+
+          # Function to format change size (with + or - prefix)
+          format_change() {
+            local change=$1
+            if [ $change -ge 0 ]; then
+              echo "+$(format_size $change)"
+            else
+              echo "$(format_size $change)"
+            fi
+          }
+
+          # Function to calculate directory sizes
+          calculate_sizes() {
+            local branch=$1
+            local output_file=$2
+            local pkg_output_file=$3
+            
+            git checkout $branch
+            npm install --no-audit
+            
+            # Calculate codebase sizes (excluding node_modules)
+            find . -type f -not -path "./.git/*" -not -path "./node_modules/*" | while read file; do
+              if [ -f "$file" ]; then
+                size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+                echo "$size $file" >> $output_file
+              fi
+            done
+            
+            # Calculate package sizes from node_modules
+            if [ -d "node_modules" ]; then
+              for pkg in node_modules/*; do
+                if [ -d "$pkg" ] && [[ ! "$pkg" == *"@"* ]]; then
+                  size=$(du -sb "$pkg" | cut -f1)
+                  echo "$size $pkg" >> $pkg_output_file
+                fi
+              done
+              # Handle scoped packages
+              for scope in node_modules/@*; do
+                if [ -d "$scope" ]; then
+                  for pkg in "$scope"/*; do
+                    if [ -d "$pkg" ]; then
+                      size=$(du -sb "$pkg" | cut -f1)
+                      echo "$size $pkg" >> $pkg_output_file
+                    fi
+                  done
+                fi
+              done
+            fi
+          }
+
+          # Function to create comparison table
+          create_table() {
+            local before_file=$1
+            local after_file=$2
+            local output_file=$3
+            local title=$4
+            
+            echo "### $title" > $output_file
+            echo "" >> $output_file
+            echo "| Package/File | Size Before | Size After | Change |" >> $output_file
+            echo "|--------------|-------------|------------|---------|" >> $output_file
+            
+            {
+              declare -A before_sizes
+              declare -A after_sizes
+              
+              while read size file; do
+                before_sizes["$file"]=$size
+              done < $before_file
+              
+              while read size file; do
+                after_sizes["$file"]=$size
+              done < $after_file
+              
+              for file in "${!after_sizes[@]}"; do
+                before=${before_sizes["$file"]:-0}
+                after=${after_sizes["$file"]}
+                change=$((after - before))
+                if [ $change -ne 0 ]; then
+                  echo "$file $before $after $change"
+                fi
+              done
+              
+              for file in "${!before_sizes[@]}"; do
+                if [ -z "${after_sizes["$file"]:-}" ]; then
+                  before=${before_sizes["$file"]}
+                  echo "$file $before 0 -$before"
+                fi
+              done
+            } | sort -k4 -nr | head -n 10 | while read file before after change; do
+              before_formatted=$(format_size $before)
+              after_formatted=$(format_size $after)
+              change_formatted=$(format_change $change)
+              echo "| \`${file#./}\` | $before_formatted | $after_formatted | $change_formatted |" >> $output_file
+            done
+            
+            echo "" >> $output_file
+          }
+
+          # Calculate sizes for base branch
+          calculate_sizes "${{ github.event.pull_request.base.sha }}" "sizes_before.txt" "pkg_sizes_before.txt"
+
+          # Calculate sizes for PR branch
+          calculate_sizes "${{ github.event.pull_request.head.sha }}" "sizes_after.txt" "pkg_sizes_after.txt"
+
+          # Create tables
+          create_table "sizes_before.txt" "sizes_after.txt" "codebase_table.md" "Top 10 Size Changes (Codebase)"
+          create_table "pkg_sizes_before.txt" "pkg_sizes_after.txt" "packages_table.md" "Top 10 Size Changes (Packages)"
+
+          # Calculate total sizes
+          total_before=$(awk '{sum += $1} END {print sum}' sizes_before.txt)
+          total_after=$(awk '{sum += $1} END {print sum}' sizes_after.txt)
+          total_change=$((total_after - total_before))
+
+          pkg_total_before=$(awk '{sum += $1} END {print sum}' pkg_sizes_before.txt)
+          pkg_total_after=$(awk '{sum += $1} END {print sum}' pkg_sizes_after.txt)
+          pkg_total_change=$((pkg_total_after - pkg_total_before))
+
+          # Format total sizes
+          echo "CODEBASE_BEFORE=$(format_size $total_before)" >> $GITHUB_ENV
+          echo "CODEBASE_AFTER=$(format_size $total_after)" >> $GITHUB_ENV
+          echo "CODEBASE_CHANGE=$(format_change $total_change)" >> $GITHUB_ENV
+
+          echo "PKG_BEFORE=$(format_size $pkg_total_before)" >> $GITHUB_ENV
+          echo "PKG_AFTER=$(format_size $pkg_total_after)" >> $GITHUB_ENV
+          echo "PKG_CHANGE=$(format_change $pkg_total_change)" >> $GITHUB_ENV
+
+          echo "CODEBASE_TABLE<<EOF" >> $GITHUB_ENV
+          cat codebase_table.md >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          echo "PACKAGES_TABLE<<EOF" >> $GITHUB_ENV
+          cat packages_table.md >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Post Size Comparison
+        uses: peter-evans/create-or-update-comment@v2
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## 📊 Project Size Analysis
+
+            ### Overall Changes
+
+            #### 💻 Codebase
+            - **Before:** ${{ env.CODEBASE_BEFORE }}
+            - **After:** ${{ env.CODEBASE_AFTER }}
+            - **Change:** ${{ env.CODEBASE_CHANGE }}
+
+            #### 📦 Packages
+            - **Before:** ${{ env.PKG_BEFORE }}
+            - **After:** ${{ env.PKG_AFTER }}
+            - **Change:** ${{ env.PKG_CHANGE }}
+
+            ${{ env.CODEBASE_TABLE }}
+
+            ${{ env.PACKAGES_TABLE }}
