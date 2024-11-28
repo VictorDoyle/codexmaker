@@ -1,0 +1,50 @@
+name: Check Project Size Before and After PR
+
+on:
+  pull_request:
+    paths:
+      - "**/*" # trigger on all changes to keep size checks atomic
+
+jobs:
+  size-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Calculate project size before PR
+        id: before_size
+        run: |
+          echo "Before PR size calculation"
+          BEFORE_SIZE=$(du -sh . | awk '{print $1}')
+          echo "Before size is $BEFORE_SIZE"
+          echo "before_size=$BEFORE_SIZE" >> $GITHUB_ENV
+
+      - name: Set up Node.js (or your specific environment)
+        uses: actions/setup-node@v2
+        with:
+          node-version: "16" #update
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+
+      - name: Calculate project size after PR
+        id: after_size
+        run: |
+          echo "After PR size calculation"
+          AFTER_SIZE=$(du -sh . | awk '{print $1}')
+          echo "After size is $AFTER_SIZE"
+          echo "after_size=$AFTER_SIZE" >> $GITHUB_ENV
+
+      - name: Comment the size difference on PR
+        uses: peter-evans/create-or-update-comment@v2
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ### Project Size Comparison:
+            - **Before PR size**: ${{ env.before_size }}
+            - **After this PR is merged**: ${{ env.after_size }}
