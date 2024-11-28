@@ -57,8 +57,11 @@ jobs:
           # Get total sizes before and after
           before_size=$(awk '{ total += $2 } END { print total }' size_before.txt)
           after_size=$(awk '{ total += $2 } END { print total }' size_after.txt)
+          size_diff=$((after_size - before_size))
+
           echo "before_size=${before_size}" >> $GITHUB_ENV
           echo "after_size=${after_size}" >> $GITHUB_ENV
+          echo "size_diff=${size_diff}" >> $GITHUB_ENV
 
       - name: Post Size Comparison
         uses: peter-evans/create-or-update-comment@v2
@@ -68,7 +71,7 @@ jobs:
             ### Project Size Comparison:
             - **Total Size Before PR**: `${{ env.before_size }} bytes`
             - **Total Size After PR**: `${{ env.after_size }} bytes`
-            - **Change**: `${{ env.after_size | minus(env.before_size) }} bytes`
+            - **Change**: `${{ env.size_diff }} bytes`
 
             #### Top 10 File Size Changes:
             ${{ env.table }}
