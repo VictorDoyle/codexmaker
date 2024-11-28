@@ -26,6 +26,30 @@ jobs:
       - name: Calculate Size Changes
         id: size-changes
         run: |
+          # Function to format file size
+          format_size() {
+            local size=$1
+            if [ $size -ge 1073741824 ]; then
+              echo "$(($size/1073741824))GB"
+            elif [ $size -ge 1048576 ]; then
+              echo "$(($size/1048576))MB"
+            elif [ $size -ge 1024 ]; then
+              echo "$(($size/1024))KB"
+            else
+              echo "${size}B"
+            fi
+          }
+
+          # Function to format change size (with + or - prefix)
+          format_change() {
+            local change=$1
+            if [ $change -ge 0 ]; then
+              echo "+$(format_size $change)"
+            else
+              echo "$(format_size $change)"
+            fi
+          }
+
           # Function to calculate directory sizes
           calculate_sizes() {
             local branch=$1
@@ -33,7 +57,7 @@ jobs:
             local pkg_output_file=$3
             
             git checkout $branch
-            npm install
+            npm install --no-audit
             
             # Calculate codebase sizes (excluding node_modules)
             find . -type f -not -path "./.git/*" -not -path "./node_modules/*" | while read file; do
@@ -105,9 +129,9 @@ jobs:
                 fi
               done
             } | sort -k4 -nr | head -n 10 | while read file before after change; do
-              before_formatted=$(numfmt --to=iec --format="%.1f" $before)
-              after_formatted=$(numfmt --to=iec --format="%.1f" $after)
-              change_formatted=$(numfmt --to=iec --format="%+.1f" $change)
+              before_formatted=$(format_size $before)
+              after_formatted=$(format_size $after)
+              change_formatted=$(format_change $change)
               echo "| \`${file#./}\` | $before_formatted | $after_formatted | $change_formatted |" >> $output_file
             done
             
@@ -134,13 +158,13 @@ jobs:
           pkg_total_change=$((pkg_total_after - pkg_total_before))
 
           # Format total sizes
-          echo "CODEBASE_BEFORE=$(numfmt --to=iec --format="%.1f" $total_before)" >> $GITHUB_ENV
-          echo "CODEBASE_AFTER=$(numfmt --to=iec --format="%.1f" $total_after)" >> $GITHUB_ENV
-          echo "CODEBASE_CHANGE=$(numfmt --to=iec --format="%+.1f" $total_change)" >> $GITHUB_ENV
+          echo "CODEBASE_BEFORE=$(format_size $total_before)" >> $GITHUB_ENV
+          echo "CODEBASE_AFTER=$(format_size $total_after)" >> $GITHUB_ENV
+          echo "CODEBASE_CHANGE=$(format_change $total_change)" >> $GITHUB_ENV
 
-          echo "PKG_BEFORE=$(numfmt --to=iec --format="%.1f" $pkg_total_before)" >> $GITHUB_ENV
-          echo "PKG_AFTER=$(numfmt --to=iec --format="%.1f" $pkg_total_after)" >> $GITHUB_ENV
-          echo "PKG_CHANGE=$(numfmt --to=iec --format="%+.1f" $pkg_total_change)" >> $GITHUB_ENV
+          echo "PKG_BEFORE=$(format_size $pkg_total_before)" >> $GITHUB_ENV
+          echo "PKG_AFTER=$(format_size $pkg_total_after)" >> $GITHUB_ENV
+          echo "PKG_CHANGE=$(format_change $pkg_total_change)" >> $GITHUB_ENV
 
           echo "CODEBASE_TABLE<<EOF" >> $GITHUB_ENV
           cat codebase_table.md >> $GITHUB_ENV
@@ -160,14 +184,14 @@ jobs:
             ### Overall Changes
 
             #### 💻 Codebase
-            - **Before:** ${{ env.CODEBASE_BEFORE }}B
-            - **After:** ${{ env.CODEBASE_AFTER }}B
-            - **Change:** ${{ env.CODEBASE_CHANGE }}B
+            - **Before:** ${{ env.CODEBASE_BEFORE }}
+            - **After:** ${{ env.CODEBASE_AFTER }}
+            - **Change:** ${{ env.CODEBASE_CHANGE }}
 
             #### 📦 Packages
-            - **Before:** ${{ env.PKG_BEFORE }}B
-            - **After:** ${{ env.PKG_AFTER }}B
-            - **Change:** ${{ env.PKG_CHANGE }}B
+            - **Before:** ${{ env.PKG_BEFORE }}
+            - **After:** ${{ env.PKG_AFTER }}
+            - **Change:** ${{ env.PKG_CHANGE }}
 
             ${{ env.CODEBASE_TABLE }}
 
