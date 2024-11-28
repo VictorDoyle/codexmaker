@@ -5,46 +5,70 @@ on:
     paths:
       - "**/*" # trigger on all changes to keep size checks atomic
 
-jobs:
-  size-check:
-    runs-on: ubuntu-latest
+permissions:
+  pull-requests: write
 
+jobs:
+  size-tracker:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
-      - name: Calculate project size before PR
-        id: before_size
-        run: |
-          echo "Before PR size calculation"
-          BEFORE_SIZE=$(du -sh . | awk '{print $1}')
-          echo "Before size is $BEFORE_SIZE"
-          echo "before_size=$BEFORE_SIZE" >> $GITHUB_ENV
-
-      - name: Set up Node.js (or your specific environment)
-        uses: actions/setup-node@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: "16" #update
+          node-version: "18" # up to 20 when verifeid
+          cache: "npm"
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build project
-        run: npm run build
-
-      - name: Calculate project size after PR
-        id: after_size
+      - name: Calculate Size Before
+        id: size-before
         run: |
-          echo "After PR size calculation"
-          AFTER_SIZE=$(du -sh . | awk '{print $1}')
-          echo "After size is $AFTER_SIZE"
-          echo "after_size=$AFTER_SIZE" >> $GITHUB_ENV
+          # Create a temporary file list with sizes before the PR
+          git checkout ${{ github.event.pull_request.base.sha }}
+          du -a --block-size=1 | sort -n > size_before.txt
 
-      - name: Comment the size difference on PR
+      - name: Calculate Size After
+        id: size-after
+        run: |
+          # Create a temporary file list with sizes after the PR
+          du -a --block-size=1 | sort -n > size_after.txt
+
+      - name: Compare Sizes
+        id: size-compare
+        run: |
+          # Compare file sizes before and after PR
+          join -j 2 size_before.txt size_after.txt -o 1.2 1.1 2.1 2.2 |
+          awk '{ change = $3 - $2; print $1, $2, $3, change }' |
+          sort -k4nr > size_changes.txt
+
+          # Create breakdown for the comment
+          echo "| File | Size Before (bytes) | Size After (bytes) | Change (bytes) |" > table.txt
+          echo "|------|---------------------|--------------------|----------------|" >> table.txt
+          head -n 10 size_changes.txt | awk '{ printf("| `%s` | %d | %d | %+d |\n", $1, $2, $3, $4) }' >> table.txt
+          echo "table=$(cat table.txt)" >> $GITHUB_ENV
+
+      - name: Calculate Total Project Size
+        id: total-size
+        run: |
+          # Get total sizes before and after
+          before_size=$(awk '{ total += $2 } END { print total }' size_before.txt)
+          after_size=$(awk '{ total += $2 } END { print total }' size_after.txt)
+          echo "before_size=${before_size}" >> $GITHUB_ENV
+          echo "after_size=${after_size}" >> $GITHUB_ENV
+
+      - name: Post Size Comparison
         uses: peter-evans/create-or-update-comment@v2
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
             ### Project Size Comparison:
-            - **Before PR size**: ${{ env.before_size }}
-            - **After this PR is merged**: ${{ env.after_size }}
+            - **Total Size Before PR**: `${{ env.before_size }} bytes`
+            - **Total Size After PR**: `${{ env.after_size }} bytes`
+            - **Change**: `${{ env.after_size | minus(env.before_size) }} bytes`
+
+            #### Top 10 File Size Changes:
+            ${{ env.table }}
