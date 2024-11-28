@@ -1,12 +1,10 @@
 import ts from 'typescript';
-import path from 'path';
-import { LanguageParser } from '../interfaces/LanguageParser';
+import { BaseParser } from './baseParser';
 import { FunctionData, ParserResult } from '../types';
 
-export class TypeScriptParser implements LanguageParser {
-  canParse(filePath: string): boolean {
-    const ext = path.extname(filePath).toLowerCase();
-    return this.getFileExtensions().includes(ext);
+export class TypeScriptParser extends BaseParser {
+  constructor() {
+    super(null); // TypeScript uses its own parser
   }
 
   getLanguageId(): string {
@@ -38,25 +36,12 @@ export class TypeScriptParser implements LanguageParser {
     return undefined;
   }
 
-  private extractParameters(node: ts.FunctionDeclaration, sourceFile: ts.SourceFile): Array<{
-    name: string;
-    type: string;
-    description?: string;
-  }> {
-    return node.parameters.map(param => {
-      const name = param.name.getText(sourceFile);
-      let type = 'any';
-
-      if (param.type) {
-        type = param.type.getText(sourceFile);
-      }
-
-      return {
-        name,
-        type,
-        description: undefined
-      };
-    });
+  private extractParameters(node: ts.FunctionDeclaration, sourceFile: ts.SourceFile): Array<{ name: string; type: string; description?: string }> {
+    return node.parameters.map(param => ({
+      name: param.name.getText(sourceFile),
+      type: param.type ? param.type.getText(sourceFile) : 'any',
+      description: undefined
+    }));
   }
 
   private extractReturnType(node: ts.FunctionDeclaration, sourceFile: ts.SourceFile): string {
@@ -78,9 +63,9 @@ export class TypeScriptParser implements LanguageParser {
         true
       );
 
-      ts.forEachChild(sourceFile, node => {
+      const visit = (node: ts.Node) => {
         if (ts.isFunctionDeclaration(node) && node.name) {
-          const functionData: FunctionData = {
+          functions.push({
             name: node.name.getText(sourceFile),
             code: node.getText(sourceFile),
             codeLang: this.getLanguageId(),
@@ -88,15 +73,23 @@ export class TypeScriptParser implements LanguageParser {
             description: this.extractJSDocComment(node, sourceFile),
             parameters: this.extractParameters(node, sourceFile),
             returnType: this.extractReturnType(node, sourceFile)
-          };
-          functions.push(functionData);
+          });
         }
-      });
+
+        ts.forEachChild(node, visit);
+      };
+
+      visit(sourceFile);
     } catch (error) {
       errors.push(`Error parsing ${filePath}: ${(error as Error).message}`);
     }
 
     return { functions, errors };
+  }
+
+  // override base class method since TS has its own
+  protected visitNode(): FunctionData | null {
+    return null;
   }
 }
 
