@@ -1,18 +1,19 @@
 import ts from 'typescript';
-import { BaseParser } from './baseParser';
+import path from 'path';
+import { LanguageParser } from '../interfaces/LanguageParser';
 import { FunctionData, ParserResult } from '../types';
 
-export class TypeScriptParser extends BaseParser {
-  constructor() {
-    super(null); // TypeScript uses its own parser
-  }
-
+export class TypeScriptParser implements LanguageParser {
   getLanguageId(): string {
     return 'typescript';
   }
 
   getFileExtensions(): string[] {
     return ['.ts', '.tsx', '.js', '.jsx'];
+  }
+
+  canParse(filePath: string): boolean {
+    return this.getFileExtensions().includes(path.extname(filePath).toLowerCase());
   }
 
   private extractJSDocComment(node: ts.Node, sourceFile: ts.SourceFile): string | undefined {
@@ -85,11 +86,6 @@ export class TypeScriptParser extends BaseParser {
     }
 
     return { functions, errors };
-  }
-
-  // override base class method since TS has its own
-  protected visitNode(): FunctionData | null {
-    return null;
   }
 }
 

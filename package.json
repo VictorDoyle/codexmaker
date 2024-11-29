@@ -4,7 +4,8 @@
   "description": "CodexMaker automates the documentation process for your applications, generating a documentation website based on your codebase.",
   "main": "index.js",
   "bin": {
-    "generate-docs": "dist/index.js"
+    "generate-docs": "dist/index.js",
+    "update-docs": "dist/bin/update-docs.js"
   },
   "scripts": {
     "build": "tsc",
@@ -43,6 +44,7 @@
     "next": "^15.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "simple-git": "^3.27.0",
     "typescript": "^5.6.3"
   },
   "files": [
