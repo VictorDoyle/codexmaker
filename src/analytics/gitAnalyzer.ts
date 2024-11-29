@@ -1,63 +1,190 @@
 import { execSync } from 'child_process';
+import fs from 'fs-extra';
 import path from 'path';
-import { FunctionChange, AnalyticsData, DependencyLink, TimelineEntry } from './types';
+import ts from 'typescript';
+
+interface FunctionChange {
+  name: string;
+  filePath: string;
+  changeCount: number;
+  lastModified: Date;
+  dependsOn: Set<string>;
+  dependedOnBy: Set<string>;
+  coChangedWith: Map<string, {
+    count: number,
+    commits: Array<{ hash: string, date: Date, message: string }>
+  }>;
+}
+
+interface Dependencies {
+  calls: string[];
+  calledBy: string[];
+}
+
+interface CoChange {
+  name: string;
+  count: number;
+  commits: Array<{ hash: string, date: Date, message: string }>;
+}
+
+interface ImpactfulFunction {
+  name: string;
+  dependencyCount: number;
+  changeCount: number;
+  lastModified: Date;
+  dependencies: Dependencies;
+  coChanges: CoChange[];
+}
+
+interface AnalyticsResult {
+  frequentlyChanged: FunctionChange[];
+  impactfulFunctions: ImpactfulFunction[];
+  totalFunctions: number;
+}
 
 export class GitAnalyzer {
   private repoPath: string;
-  private functionChanges: Map<string, FunctionChange>;
-  private functionFiles: Map<string, Set<string>>;
+  private functionChanges: Map<string, FunctionChange> = new Map();
+  private dependencyGraph: Map<string, Set<string>> = new Map();
 
   constructor(repoPath: string) {
     this.repoPath = repoPath;
-    this.functionChanges = new Map();
-    this.functionFiles = new Map();
   }
 
-  public async analyze(): Promise<AnalyticsData> {
-    await this.buildFunctionFileMap();
-    await this.processGitHistory();
-
-    return {
-      functionChanges: this.functionChanges,
-      dependencies: this.calculateDependencies(),
-      timeline: this.buildTimeline(),
-      hotspots: this.calculateHotspots()
-    };
+  async analyze(): Promise<AnalyticsResult> {
+    await this.buildDependencyGraph();
+    await this.analyzeFunctionChanges();
+    return this.generateAnalytics();
   }
 
-  private async buildFunctionFileMap() {
-    const files = execSync('git ls-files', { cwd: this.repoPath })
+  private async buildDependencyGraph() {
+    const files = execSync('git ls-files "*.ts" "*.js"', { cwd: this.repoPath })
       .toString()
       .split('\n')
-      .filter(f => f);
+      .filter(Boolean);
 
-    // mpa functions to their files
-    files.forEach(file => {
-      const ext = path.extname(file);
-      if (['.ts', '.js', '.py', '.php', '.cpp', '.java'].includes(ext)) {
-        const content = execSync(`git show HEAD:${file}`, { cwd: this.repoPath }).toString();
-        const functions = this.extractFunctions(content);
-        functions.forEach(func => {
-          if (!this.functionFiles.has(func)) {
-            this.functionFiles.set(func, new Set());
-          }
-          this.functionFiles.get(func)!.add(file);
-        });
+    // collect all function declarations
+    const allFunctions = new Set<string>();
+    for (const file of files) {
+      const content = await fs.readFile(path.join(this.repoPath, file), 'utf-8');
+      const sourceFile = ts.createSourceFile(
+        file,
+        content,
+        ts.ScriptTarget.Latest,
+        true
+      );
+
+      this.collectFunctionDeclarations(sourceFile, allFunctions);
+    }
+
+    // analyze dependencies
+    for (const file of files) {
+      const content = await fs.readFile(path.join(this.repoPath, file), 'utf-8');
+      const sourceFile = ts.createSourceFile(
+        file,
+        content,
+        ts.ScriptTarget.Latest,
+        true
+      );
+
+      this.analyzeDependencies(sourceFile, allFunctions);
+    }
+  }
+
+  private collectFunctionDeclarations(sourceFile: ts.SourceFile, allFunctions: Set<string>) {
+    const visit = (node: ts.Node) => {
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        allFunctions.add(node.name.getText(sourceFile));
       }
-    });
+      if (ts.isVariableDeclaration(node) &&
+        ts.isFunctionExpression(node.initializer || {} as any)) {
+        if (ts.isIdentifier(node.name)) {
+          allFunctions.add(node.name.getText(sourceFile));
+        }
+      }
+      node.forEachChild(visit);
+    };
+    visit(sourceFile);
   }
 
-  private extractFunctions(content: string): string[] {
-    // regex for function detection 
-    // TODO: maybe import parsers here
-    const functionRegex = /function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-    const matches = [...content.matchAll(functionRegex)];
-    return matches.map(m => m[1]);
+  private analyzeDependencies(sourceFile: ts.SourceFile, allFunctions: Set<string>) {
+    let currentFunction: string | null = null;
+
+    const visit = (node: ts.Node) => {
+      // look at function declarations
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        currentFunction = node.name.getText(sourceFile);
+        if (!this.dependencyGraph.has(currentFunction)) {
+          this.dependencyGraph.set(currentFunction, new Set());
+        }
+
+        // analyze function body for dependencies
+        if (node.body) {
+          this.analyzeFunctionBody(node.body, currentFunction, sourceFile, allFunctions);
+        }
+      }
+
+      // look at variable declarations that are functions
+      if (ts.isVariableDeclaration(node) &&
+        ts.isFunctionExpression(node.initializer || {} as any)) {
+        if (ts.isIdentifier(node.name)) {
+          currentFunction = node.name.getText(sourceFile);
+          if (!this.dependencyGraph.has(currentFunction)) {
+            this.dependencyGraph.set(currentFunction, new Set());
+          }
+
+          // anlyze function body
+          const initializer = node.initializer as ts.FunctionExpression;
+          if (initializer.body) {
+            this.analyzeFunctionBody(initializer.body, currentFunction, sourceFile, allFunctions);
+          }
+        }
+      }
+
+      node.forEachChild(visit);
+    };
+
+    visit(sourceFile);
   }
 
-  private async processGitHistory() {
+  private analyzeFunctionBody(
+    body: ts.Node,
+    currentFunction: string,
+    sourceFile: ts.SourceFile,
+    allFunctions: Set<string>
+  ) {
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        let calledFunctionName: string | undefined;
+
+        // direct function calls
+        if (ts.isIdentifier(node.expression)) {
+          calledFunctionName = node.expression.getText(sourceFile);
+        }
+        // method calls on objects
+        else if (ts.isPropertyAccessExpression(node.expression)) {
+          calledFunctionName = node.expression.name.getText(sourceFile);
+        }
+
+        if (calledFunctionName && allFunctions.has(calledFunctionName)) {
+          this.dependencyGraph.get(currentFunction)?.add(calledFunctionName);
+
+          // init or update dependedOnBy relationships
+          if (!this.dependencyGraph.has(calledFunctionName)) {
+            this.dependencyGraph.set(calledFunctionName, new Set());
+          }
+        }
+      }
+
+      node.forEachChild(visit);
+    };
+
+    visit(body);
+  }
+
+  private async analyzeFunctionChanges() {
     const gitLog = execSync(
-      'git log --pretty=format:"%H|||%at|||%s" --name-only',
+      'git log --name-status --pretty=format:"%H|||%at|||%s"',
       { cwd: this.repoPath }
     ).toString();
 
@@ -66,111 +193,129 @@ export class GitAnalyzer {
       const [hash, timestamp, message] = header.split('|||');
       return {
         hash,
-        timestamp: new Date(parseInt(timestamp) * 1000),
+        date: new Date(parseInt(timestamp) * 1000),
         message,
-        files: files.filter(f => f)
+        files: files.map(f => f.split('\t')[1]).filter(Boolean)
       };
     });
 
-    commits.forEach(commit => {
-      const affectedFunctions = new Set<string>();
+    for (const commit of commits) {
+      const changedFunctions = new Set<string>();
 
-      commit.files.forEach(file => {
-        this.functionFiles.forEach((files, funcName) => {
-          if (files.has(file)) {
-            affectedFunctions.add(funcName);
-            this.updateFunctionChange(funcName, commit);
-          }
-        });
-      });
+      for (const file of commit.files) {
+        if (file.endsWith('.ts') || file.endsWith('.js')) {
+          try {
+            const content = execSync(
+              `git show ${commit.hash}:${file}`,
+              { cwd: this.repoPath }
+            ).toString();
 
-      // update co-changes
-      Array.from(affectedFunctions).forEach(func1 => {
-        Array.from(affectedFunctions).forEach(func2 => {
-          if (func1 !== func2) {
-            const change = this.functionChanges.get(func1)!;
-            change.coChangedFunctions.set(
-              func2,
-              (change.coChangedFunctions.get(func2) || 0) + 1
+            const sourceFile = ts.createSourceFile(
+              file,
+              content,
+              ts.ScriptTarget.Latest,
+              true
             );
+
+            this.findChangedFunctions(sourceFile, changedFunctions);
+          } catch (error) {
+            // File might not exist in this commit
+            continue;
+          }
+        }
+      }
+
+      changedFunctions.forEach(funcName => {
+        if (!this.functionChanges.has(funcName)) {
+          this.functionChanges.set(funcName, {
+            name: funcName,
+            filePath: commit.files[0],
+            changeCount: 0,
+            lastModified: commit.date,
+            dependsOn: this.dependencyGraph.get(funcName) || new Set(),
+            dependedOnBy: new Set(),
+            coChangedWith: new Map()
+          });
+        }
+
+        const change = this.functionChanges.get(funcName)!;
+        change.changeCount++;
+        change.lastModified = commit.date;
+
+        changedFunctions.forEach(otherFunc => {
+          if (otherFunc !== funcName) {
+            if (!change.coChangedWith.has(otherFunc)) {
+              change.coChangedWith.set(otherFunc, {
+                count: 0,
+                commits: []
+              });
+            }
+            const coChange = change.coChangedWith.get(otherFunc)!;
+            coChange.count++;
+            coChange.commits.push({
+              hash: commit.hash,
+              date: commit.date,
+              message: commit.message
+            });
           }
         });
-      });
-    });
-  }
-
-  private updateFunctionChange(functionName: string, commit: { hash: string; timestamp: Date; message: string }) {
-    if (!this.functionChanges.has(functionName)) {
-      this.functionChanges.set(functionName, {
-        name: functionName,
-        filePath: Array.from(this.functionFiles.get(functionName) || []).join(', '),
-        changeCount: 0,
-        lastModified: commit.timestamp,
-        commits: [],
-        coChangedFunctions: new Map()
       });
     }
-
-    const change = this.functionChanges.get(functionName)!;
-    change.changeCount++;
-    change.commits.push({
-      hash: commit.hash,
-      timestamp: commit.timestamp,
-      message: commit.message
-    });
   }
 
-  private calculateDependencies(): DependencyLink[] {
-    const dependencies: DependencyLink[] = [];
+  private findChangedFunctions(sourceFile: ts.SourceFile, functions: Set<string>) {
+    const visit = (node: ts.Node) => {
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        functions.add(node.name.getText(sourceFile));
+      }
+      node.forEachChild(visit);
+    };
 
-    this.functionChanges.forEach((change, funcName) => {
-      change.coChangedFunctions.forEach((count, target) => {
-        const confidence = count / change.changeCount;
-        if (confidence > 0.5) { // only include strong dependencies
-          dependencies.push({
-            source: funcName,
-            target,
-            changeCount: count,
-            confidence
-          });
+    visit(sourceFile);
+  }
+
+  private generateAnalytics(): AnalyticsResult {
+    const reverseDependencies = new Map<string, Set<string>>();
+    this.dependencyGraph.forEach((deps, func) => {
+      deps.forEach(dep => {
+        if (!reverseDependencies.has(dep)) {
+          reverseDependencies.set(dep, new Set());
         }
+        reverseDependencies.get(dep)!.add(func);
       });
     });
 
-    return dependencies.sort((a, b) => b.confidence - a.confidence);
-  }
+    const impactfulFunctions = Array.from(this.functionChanges.values())
+      .map(func => {
+        const dependenciesCount = (this.dependencyGraph.get(func.name)?.size || 0);
+        const dependedOnByCount = (reverseDependencies.get(func.name)?.size || 0);
 
-  private buildTimeline(): TimelineEntry[] {
-    const timeline: TimelineEntry[] = [];
-    const processedCommits = new Set<string>();
+        return {
+          name: func.name,
+          dependencyCount: dependenciesCount + dependedOnByCount,
+          changeCount: func.changeCount,
+          lastModified: func.lastModified,
+          dependencies: {
+            calls: Array.from(this.dependencyGraph.get(func.name) || []),
+            calledBy: Array.from(reverseDependencies.get(func.name) || [])
+          },
+          coChanges: Array.from(func.coChangedWith.entries())
+            .map(([name, data]) => ({
+              name,
+              count: data.count,
+              commits: data.commits
+            }))
+            .sort((a, b) => b.count - a.count)
+        };
+      })
+      .sort((a, b) => b.dependencyCount - a.dependencyCount);
 
-    this.functionChanges.forEach(change => {
-      change.commits.forEach(commit => {
-        if (!processedCommits.has(commit.hash)) {
-          processedCommits.add(commit.hash);
-          timeline.push({
-            timestamp: commit.timestamp,
-            functions: Array.from(this.functionChanges.entries())
-              .filter(([_, fc]) => fc.commits.some(c => c.hash === commit.hash))
-              .map(([name]) => name),
-            commitHash: commit.hash,
-            commitMessage: commit.message
-          });
-        }
-      });
-    });
-
-    return timeline.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  }
-
-  private calculateHotspots(): Array<{ function: string; score: number }> {
-    return Array.from(this.functionChanges.entries())
-      .map(([name, change]) => ({
-        function: name,
-        score: change.changeCount *
-          (change.coChangedFunctions.size + 1) *
-          Math.log(Date.now() - change.lastModified.getTime())
-      }))
-      .sort((a, b) => b.score - a.score);
+    return {
+      frequentlyChanged: Array.from(this.functionChanges.values())
+        .sort((a, b) => b.changeCount - a.changeCount)
+        .slice(0, 10),
+      impactfulFunctions,
+      totalFunctions: this.functionChanges.size
+    };
   }
 }

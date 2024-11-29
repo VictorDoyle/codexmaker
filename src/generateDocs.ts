@@ -2,6 +2,8 @@ import fs from 'fs-extra';
 import path from 'path';
 import { execSync } from 'child_process';
 import inquirer from 'inquirer';
+import { GitAnalyzer } from './analytics/gitAnalyzer';
+import { AnalyticsGenerator } from './generators/analyticsGenerator';
 
 
 process.on('SIGINT', () => {
@@ -35,15 +37,19 @@ async function promptForGithubUsername() {
   return answers.githubUsername;
 }
 
-
-// FIXME: Todo in v2
+/**
+ * Testing if this erases my original comment
+ * @param array $numbers An array of integers.
+ * @return int The maximum integer in the array.
+ * @throws InvalidArgumentException If the array is empty.
+ */
 async function checkDependencies(outputDir: string) {
   const requiredPackages = [
-    'next', 'react', 'react-dom', 'nextra', 'nextra-theme-docs', 'typescript', '@types/node'
+    'next', 'react', 'react-dom', 'nextra', 'nextra-theme-docs', 'typescript', '@types/node',
+    'simple-git', 'tree-sitter', 'tree-sitter-typescript'
   ];
   const packageJsonPath = path.join(outputDir, 'package.json');
 
-  // make basic package.json if none found
   if (!await fs.pathExists(packageJsonPath)) {
     const packageJsonContent = {
       name: `${path.basename(process.cwd())}-docs`,
@@ -59,7 +65,10 @@ async function checkDependencies(outputDir: string) {
         'nextra': '^2.8.0',
         'nextra-theme-docs': '^2.8.0',
         'react': '^18.2.0',
-        'react-dom': '^18.2.0'
+        'react-dom': '^18.2.0',
+        'simple-git': '^3.22.0',
+        'tree-sitter': '^0.20.6',
+        'tree-sitter-typescript': '^0.20.3'
       },
       devDependencies: {
         '@types/node': '^20.3.1',
@@ -71,7 +80,6 @@ async function checkDependencies(outputDir: string) {
   }
 
   const packageJson = require(packageJsonPath);
-
   const installedPackages = new Set([
     ...Object.keys(packageJson.dependencies || {}),
     ...Object.keys(packageJson.devDependencies || {})
@@ -97,13 +105,11 @@ async function checkDependencies(outputDir: string) {
   }
 }
 
-
 async function generateNextraConfig(outputDir: string, functionData: any[], projectName: string, githubUsername: string) {
   const pagesDir = path.join(outputDir, 'pages');
   const publicDir = path.join(outputDir, 'public');
   const nextConfigPath = path.join(outputDir, 'next.config.mjs');
 
-  // genereate next.config file
   const nextConfigContent = `
   import nextra from 'nextra'
 
@@ -119,9 +125,10 @@ async function generateNextraConfig(outputDir: string, functionData: any[], proj
   await fs.ensureDir(publicDir);
 
   const functionsDir = path.join(pagesDir, 'functions');
+  const analyticsDir = path.join(pagesDir, 'analytics');
   await fs.ensureDir(functionsDir);
+  await fs.ensureDir(analyticsDir);
 
-  // TODO: Clearup index page
   const indexMdx = `# ${projectName}
 
 Welcome to the Documentation Website for ${projectName}. 
@@ -129,10 +136,15 @@ Welcome to the Documentation Website for ${projectName}.
 ## Quick Overview
 This documentation provides a detailed reference for all functions in the entire codebase.
 
-## Getting Started
+## Navigation
 - Use the sidebar to explore different functions
+- Check out the Analytics section for code insights
 - Each function has its own detailed documentation page
 - The website is fully indexed and searchable
+
+## Sections
+- [Functions](/functions) - Complete function documentation
+- [Analytics](/analytics) - Code insights and dependencies
 
 ## Customizing it to your liking
 - If you need to modify themes, you can
@@ -140,10 +152,9 @@ This documentation provides a detailed reference for all functions in the entire
 `;
   await fs.writeFile(path.join(pagesDir, 'index.mdx'), indexMdx);
 
-  // gen MDX pages for each function
+  // Generate function pages
   for (const functionInfo of functionData) {
     const { name, code, codeLang, description, parameters, returnType } = functionInfo;
-
     const functionTitle = name.charAt(0).toUpperCase() + name.slice(1);
 
     const mdxContent = `
@@ -184,6 +195,14 @@ Add an example of how to use this function
     await fs.writeFile(mdxFilePath, mdxContent);
   }
 
+  // make analytics pages
+  console.log('Generating analytics data...');
+  const gitAnalyzer = new GitAnalyzer(process.cwd());
+  const analyticsData = await gitAnalyzer.analyze();
+  const analyticsGenerator = new AnalyticsGenerator(outputDir, analyticsData);
+  await analyticsGenerator.generate();
+  console.log('Analytics generation complete');
+
   const themeConfigPath = path.join(outputDir, 'theme.config.tsx');
   const themeConfigContent = `
 import React from 'react'
@@ -218,7 +237,6 @@ export default config
   `;
   await fs.writeFile(themeConfigPath, themeConfigContent);
 }
-//TODO: Fix this up and cleanup
 async function generateDocs(functionData: any[], outputDir: string): Promise<void> {
   const projectName = await promptForProjectName();
   const githubUsername = await promptForGithubUsername();

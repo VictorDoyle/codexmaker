@@ -1,168 +1,95 @@
 import fs from 'fs-extra';
 import path from 'path';
-import { AnalyticsData, DependencyLink } from '../analytics/types';
 
 export class AnalyticsGenerator {
   private outputDir: string;
-  private data: AnalyticsData;
+  private data: any;
 
-  constructor(outputDir: string, data: AnalyticsData) {
+  constructor(outputDir: string, data: any) {
     this.outputDir = outputDir;
     this.data = data;
   }
 
-  public async generate(): Promise<void> {
+  async generate(): Promise<void> {
     const analyticsDir = path.join(this.outputDir, 'pages', 'analytics');
     await fs.ensureDir(analyticsDir);
 
-    // make subdir
-    const hotspotsDir = path.join(analyticsDir, 'hotspots');
-    const dependenciesDir = path.join(analyticsDir, 'dependencies');
-    const timelineDir = path.join(analyticsDir, 'timeline');
-
-    await fs.ensureDir(hotspotsDir);
-    await fs.ensureDir(dependenciesDir);
-    await fs.ensureDir(timelineDir);
-
-    await this.generateIndexPage(analyticsDir);
-    await this.generateHotspotsPages(hotspotsDir);
-    await this.generateDependenciesPages(dependenciesDir);
-    await this.generateTimelinePages(timelineDir);
-  }
-
-  private async generateIndexPage(dir: string): Promise<void> {
-    const content = `# Code Analytics
+    const indexContent = `# Code Change Analysis
 
 ## Overview
-This section provides insights into your codebase's evolution and dependencies.
+Analyzing ${this.data.totalFunctions} functions in your codebase.
 
-### Quick Stats
-- Total Functions Analyzed: ${this.data.functionChanges.size}
-- Total Dependencies Found: ${this.data.dependencies.length}
-- Timeline Entries: ${this.data.timeline.length}
+## Key Findings
+- Most frequently changed functions
+- Function dependencies and impacts
+- Change patterns and relationships
 
-### Sections
-- [Hotspots](/analytics/hotspots) - Most frequently changing functions
-- [Dependencies](/analytics/dependencies) - Function change patterns and relationships
-- [Timeline](/analytics/timeline) - Chronological view of changes
-
-### Why This Matters
-Understanding how your code evolves can help:
-- Identify areas that need refactoring
-- Discover hidden dependencies
-- Plan maintenance and testing strategies
+## Navigation
+- [Change Frequency](./change-frequency) - Most frequently modified functions
+- [Dependencies](./dependencies) - Function relationships and impacts
+- [Change Patterns](./change-patterns) - How functions change together
 `;
-    await fs.writeFile(path.join(dir, 'index.mdx'), content);
-  }
+    await fs.writeFile(path.join(analyticsDir, 'index.mdx'), indexContent);
 
-  private async generateHotspotsPages(dir: string): Promise<void> {
-    const indexContent = `# Code Hotspots
+    const frequencyContent = `# Change Frequency Analysis
 
-Functions that change most frequently and have the most impact.
+This page shows which functions are modified most frequently.
 
-## Quick Stats
-${this.data.hotspots.slice(0, 5).map((spot, index) => `
-### ${index + 1}. ${spot.function}
-Score: ${spot.score.toFixed(2)}
-`).join('\n')}
-
-[View Detailed Analysis](./hotspots/details)
-`;
-    await fs.writeFile(path.join(dir, 'index.mdx'), indexContent);
-
-    const detailsContent = `# Detailed Hotspot Analysis
-
-## Top Hotspots by Change Frequency
-${this.data.hotspots.map((spot, index) => `
-### ${index + 1}. ${spot.function}
-- **Score**: ${spot.score.toFixed(2)}
-- **Changes**: ${this.data.functionChanges.get(spot.function)?.changeCount || 0}
-- **Last Modified**: ${this.data.functionChanges.get(spot.function)?.lastModified.toLocaleDateString()}
-- **Co-changes**: ${this.data.functionChanges.get(spot.function)?.coChangedFunctions.size || 0} related functions
-
-#### Recent Commits
-${this.data.functionChanges.get(spot.function)?.commits.slice(0, 5).map(commit => `
-- ${commit.timestamp.toLocaleDateString()}: ${commit.message} (${commit.hash.substring(0, 7)})
-`).join('') || 'No recent commits'}
+${this.data.frequentlyChanged.map((func: any, index: number) => `
+## ${index + 1}. ${func.name}
+- Changed ${func.changeCount} times
+- Last modified: ${func.lastModified.toLocaleDateString()}
+- File: ${func.filePath}
 `).join('\n')}
 `;
-    await fs.writeFile(path.join(dir, 'details.mdx'), detailsContent);
-  }
+    await fs.writeFile(path.join(analyticsDir, 'change-frequency.mdx'), frequencyContent);
 
-  private async generateDependenciesPages(dir: string): Promise<void> {
-    const indexContent = `# Function Dependencies
 
-Analysis of functions that frequently change together.
+    const dependenciesContent = `# Function Dependencies
 
-## Top Dependencies
-${this.data.dependencies.slice(0, 5).map((dep, index) => `
-### ${index + 1}. ${dep.source} → ${dep.target}
-- Changes Together: ${dep.changeCount} times
-- Confidence: ${(dep.confidence * 100).toFixed(1)}%
-`).join('\n')}
+This shows how functions are connected and their impact on the codebase.
 
-[View All Dependencies](./dependencies/details)
-`;
-    await fs.writeFile(path.join(dir, 'index.mdx'), indexContent);
+${this.data.impactfulFunctions.map((func: any) => `
+## ${func.name}
+### Impact Score: ${func.dependencyCount} (${func.changeCount} changes)
 
-    const detailsContent = `# Detailed Dependencies Analysis
+#### Dependencies
+- **Calls**: ${func.dependencies.calls.length > 0 ?
+        func.dependencies.calls.map((f: string) => `\`${f}\``).join(', ') :
+        'No dependencies'}
+- **Called By**: ${func.dependencies.calledBy.length > 0 ?
+        func.dependencies.calledBy.map((f: string) => `\`${f}\``).join(', ') :
+        'Not called by other functions'}
 
-## All Function Dependencies
-${this.data.dependencies.map((dep, index) => `
-### ${index + 1}. ${dep.source} → ${dep.target}
-- **Change Together**: ${dep.changeCount} times
-- **Confidence**: ${(dep.confidence * 100).toFixed(1)}%
-- **Source Changes**: ${this.data.functionChanges.get(dep.source)?.changeCount || 0} total
-- **Target Changes**: ${this.data.functionChanges.get(dep.target)?.changeCount || 0} total
-
-#### Recent Co-Changes
-${this.getRecentCoChanges(dep.source, dep.target)}
+#### Change Impact
+When this function changes, these functions often need updates:
+${func.coChanges.slice(0, 5).map((co: any) => `
+- \`${co.name}\` (${co.count} times)
+  - Last change: ${co.commits[0]?.date.toLocaleDateString() || 'N/A'}
+  - Reason: ${co.commits[0]?.message || 'N/A'}
+`).join('')}
 `).join('\n')}
 `;
-    await fs.writeFile(path.join(dir, 'details.mdx'), detailsContent);
-  }
+    await fs.writeFile(path.join(analyticsDir, 'dependencies.mdx'), dependenciesContent);
 
-  private async generateTimelinePages(dir: string): Promise<void> {
-    const indexContent = `# Change Timeline
+    const patternsContent = `# Change Patterns
 
-Chronological view of function changes.
+Understanding how functions change together.
 
-## Recent Changes
-${this.data.timeline.slice(0, 5).map(entry => `
-### ${entry.timestamp.toLocaleDateString()} ${entry.timestamp.toLocaleTimeString()}
-- **Commit**: ${entry.commitHash.substring(0, 8)}
-- **Message**: ${entry.commitMessage}
-- **Functions Changed**: ${entry.functions.length}
+${this.data.impactfulFunctions.slice(0, 10).map((func: any) => `
+## ${func.name} Change Pattern
+- Total Changes: ${func.changeCount}
+- Dependencies: ${func.dependencyCount}
+
+### Common Co-changes
+${func.coChanges.slice(0, 5).map((co: any) => `
+#### With \`${co.name}\`
+- Changed together ${co.count} times
+- Recent changes:
+${co.commits.slice(0, 3).map((commit: any) => `  - ${commit.date.toLocaleDateString()}: ${commit.message}`).join('\n')}
 `).join('\n')}
-
-[View Full Timeline](./timeline/details)
-`;
-    await fs.writeFile(path.join(dir, 'index.mdx'), indexContent);
-
-    const detailsContent = `# Complete Change Timeline
-
-${this.data.timeline.map(entry => `
-## ${entry.timestamp.toLocaleDateString()} ${entry.timestamp.toLocaleTimeString()}
-- **Commit**: ${entry.commitHash.substring(0, 8)}
-- **Message**: ${entry.commitMessage}
-- **Changed Functions**:
-${entry.functions.map(f => `  - ${f}`).join('\n')}
 `).join('\n')}
 `;
-    await fs.writeFile(path.join(dir, 'details.mdx'), detailsContent);
-  }
-
-  private getRecentCoChanges(source: string, target: string): string {
-    const coChanges = this.data.timeline
-      .filter(entry => entry.functions.includes(source) && entry.functions.includes(target))
-      .slice(0, 3);
-
-    if (coChanges.length === 0) {
-      return 'No recent co-changes found';
-    }
-
-    return coChanges.map(entry => `
-- ${entry.timestamp.toLocaleDateString()}: ${entry.commitMessage} (${entry.commitHash.substring(0, 7)})
-`).join('');
+    await fs.writeFile(path.join(analyticsDir, 'change-patterns.mdx'), patternsContent);
   }
 }
