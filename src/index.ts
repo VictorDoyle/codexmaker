@@ -6,6 +6,8 @@ import generateDocs from './generateDocs';
 import { getFunctionData } from './functionScanner';
 import setupNextra from './nextraSetup';
 import { availableParsers } from './parsers';
+import { GitAnalyzer } from './analytics/gitAnalyzer';
+import { AnalyticsGenerator } from './generators/analyticsGenerator';
 
 async function main() {
   const args = minimist(process.argv.slice(2));
@@ -35,6 +37,14 @@ async function main() {
   console.log(`Found ${functionData.length} functions to document`);
   await generateDocs(functionData, targetDir);
   await setupNextra(targetDir);
+  console.log('Generating analytics...');
+  const gitAnalyzer = new GitAnalyzer(process.cwd());
+  const analyticsData = await gitAnalyzer.analyze();
+
+  const analyticsGenerator = new AnalyticsGenerator(targetDir, analyticsData);
+  await analyticsGenerator.generate();
+
+  console.log('Analytics generation complete');
 }
 
 main().catch(error => {

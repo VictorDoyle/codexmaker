@@ -4,11 +4,13 @@ import { LanguageParser } from '../interfaces/LanguageParser';
 import { FunctionData, ParserResult } from '../types';
 
 export abstract class BaseParser implements LanguageParser {
-  protected parser: Parser;
+  protected parser?: Parser;
 
   constructor(language: any) {
-    this.parser = new Parser();
-    this.parser.setLanguage(language);
+    if (language) {
+      this.parser = new Parser();
+      this.parser.setLanguage(language);
+    }
   }
 
   canParse(filePath: string): boolean {
@@ -24,6 +26,10 @@ export abstract class BaseParser implements LanguageParser {
     const errors: string[] = [];
 
     try {
+      if (!this.parser) {
+        throw new Error('Parser not initialized');
+      }
+
       const tree = this.parser.parse(content);
       const visit = (node: Parser.SyntaxNode) => {
         const func = this.visitNode(node, content);
