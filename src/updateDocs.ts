@@ -1,7 +1,9 @@
-import fs from 'fs-extra';
+#!/usr/bin/env node
 import path from 'path';
-import { GitAnalyzer } from './analytics/gitAnalyzer';
-import { AnalyticsGenerator } from './generators/analyticsGenerator';
+import fs from 'fs-extra';
+import minimist from 'minimist';
+import { getFunctionData } from './functionScanner';
+import { shouldProcessFile } from './utils/fileFilter';
 
 interface UpdateSummary {
   added: string[];
@@ -10,55 +12,10 @@ interface UpdateSummary {
   errors: string[];
 }
 
-export async function updateDocs(functionData: any[], outputDir: string): Promise<void> {
-  const summary: UpdateSummary = {
-    added: [],
-    updated: [],
-    unchanged: [],
-    errors: []
-  };
-
-  const pagesDir = path.join(outputDir, 'pages');
-  const functionsDir = path.join(pagesDir, 'functions');
-
-  await fs.ensureDir(functionsDir);
-
-  for (const functionInfo of functionData) {
-    const { name, code, codeLang, description, parameters, returnType } = functionInfo;
-    const mdxPath = path.join(functionsDir, `${name}.mdx`);
-
-    try {
-      if (await fs.pathExists(mdxPath)) {
-        await updateExistingDoc(mdxPath, functionInfo, summary);
-      } else {
-        await createNewDoc(mdxPath, functionInfo, summary);
-      }
-    } catch (error) {
-      summary.errors.push(`Error processing ${name}: ${(error as Error).message}`);
-    }
-  }
-
-  console.log('Updating analytics...');
-  const gitAnalyzer = new GitAnalyzer(process.cwd());
-  const analyticsData = await gitAnalyzer.analyze();
-  const analyticsGenerator = new AnalyticsGenerator(outputDir, analyticsData);
-  await analyticsGenerator.generate();
-
-  console.log('\nUpdate Summary:');
-  console.log(`Added: ${summary.added.length} functions`);
-  console.log(`Updated: ${summary.updated.length} functions`);
-  console.log(`Unchanged: ${summary.unchanged.length} functions`);
-  if (summary.errors.length > 0) {
-    console.log('\nErrors encountered:');
-    summary.errors.forEach(error => console.log(`- ${error}`));
-  }
-}
-
 async function updateExistingDoc(mdxPath: string, functionInfo: any, summary: UpdateSummary) {
   const existingContent = await fs.readFile(mdxPath, 'utf-8');
   const { name, code, codeLang, description, parameters, returnType } = functionInfo;
 
-  // parse pre existing content to preserve custom sections/docs
   const sections = parseExistingContent(existingContent);
   const currentCodeSection = extractCodeSection(existingContent);
 
@@ -67,7 +24,6 @@ async function updateExistingDoc(mdxPath: string, functionInfo: any, summary: Up
     return;
   }
 
-  // update automatically generated sections while preserving custom content
   const newContent = `
 # ${name}
 
@@ -212,7 +168,6 @@ function parseExistingContent(content: string): {
       continue;
     }
 
-    // collect any custom sections
     if (line.startsWith('###') &&
       !line.includes('Parameters') &&
       !line.includes('Return Value') &&
@@ -240,3 +195,70 @@ function extractCodeSection(content: string): string {
   const codeMatch = content.match(/```[\w-]+\s+showLineNumbers([\s\S]*?)```/);
   return codeMatch ? codeMatch[1].trim() : '';
 }
+
+if (require.main === module) {
+  const args = minimist(process.argv.slice(2));
+  const outputDir = args.output || 'docs/codexMaker';
+  const targetDir = path.resolve(process.cwd(), outputDir);
+
+  (async () => {
+    if (!await fs.pathExists(targetDir)) {
+      console.error(`Documentation directory not found at ${targetDir}. Please run generate-docs first.`);
+      process.exit(1);
+    }
+
+    console.log('Scanning for functions...');
+    const functionData = await getFunctionData(process.cwd());
+
+    if (functionData.length === 0) {
+      console.log('No functions found in the codebase. Update aborted.');
+      return;
+    }
+
+    const summary: UpdateSummary = {
+      added: [],
+      updated: [],
+      unchanged: [],
+      errors: []
+    };
+
+    console.log(`Found ${functionData.length} functions to process`);
+
+    const pagesDir = path.join(targetDir, 'pages');
+    const functionsDir = path.join(pagesDir, 'functions');
+    await fs.ensureDir(functionsDir);
+
+    for (const functionInfo of functionData) {
+      const mdxPath = path.join(functionsDir, `${functionInfo.name}.mdx`);
+
+      try {
+        if (await fs.pathExists(mdxPath)) {
+          await updateExistingDoc(mdxPath, functionInfo, summary);
+        } else {
+          await createNewDoc(mdxPath, functionInfo, summary);
+        }
+      } catch (error) {
+        summary.errors.push(`Error processing ${functionInfo.name}: ${(error as Error).message}`);
+      }
+    }
+
+    console.log('\nUpdate Summary:');
+    console.log(`Added: ${summary.added.length} functions`);
+    console.log(`Updated: ${summary.updated.length} functions`);
+    console.log(`Unchanged: ${summary.unchanged.length} functions`);
+    if (summary.errors.length > 0) {
+      console.log('\nErrors encountered:');
+      summary.errors.forEach(error => console.log(`- ${error}`));
+    }
+  })().catch(error => {
+    console.error('Error during documentation update:', error);
+    process.exit(1);
+  });
+}
+
+export {
+  updateExistingDoc,
+  createNewDoc,
+  parseExistingContent,
+  extractCodeSection
+};
