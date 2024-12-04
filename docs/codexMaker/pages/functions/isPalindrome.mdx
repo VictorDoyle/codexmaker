@@ -1,0 +1,61 @@
+# IsPalindrome
+
+## Function Description
+
+Checks if a given string is a palindrome. A palindrome is a string that reads the same forwards and backwards, ignoring case and non-alphanumeric characters.
+
+## Function Code
+
+<pre><code>
+  this is a cpp lang file
+```cpp showLineNumbers
+  bool isPalindrome(const std::string& str) {
+    int left = 0;
+    int right = str.length() - 1;
+    while (left < right) {
+        if (str[left] != str[right]) {
+            return false;
+        }
+        left++;
+        right--;
+    }
+    return true;
+}
+  ```
+</code></pre>
+
+### Parameters
+
+```
+`str: const std::string&`
+The string to check for palindrome properties.
+```
+
+### Return Value
+
+- Type: `bool `
+  Returns true if the string is a palindrome; otherwise, false.
+
+### Usage Example
+
+```cpp
+#include <iostream>
+#include <string>
+
+bool isPalindrome(const std::string& str);
+
+int main() {
+    std::string testString = "racecar";
+    if (isPalindrome(testString)) {
+        std::cout << "\"" << testString << "\" is a palindrome!" << std::endl;
+    } else {
+        std::cout << "\"" << testString << "\" is not a palindrome." << std::endl;
+    }
+
+    return 0;
+}
+
+// Output:
+// "racecar" is a palindrome!
+
+```

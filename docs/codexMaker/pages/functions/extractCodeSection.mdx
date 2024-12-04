@@ -1,0 +1,55 @@
+# ExtractCodeSection
+
+## Function Description
+
+Extracts the content of a code block with specific metadata (`showLineNumbers`) from a string. Useful for parsing and extracting code snippets from Markdown-like content.
+
+## Function Code
+
+<pre><code>
+```typescript showLineNumbers
+  function extractCodeSection(content: string): string {
+  const codeMatch = content.match(/```[\w-]+\s+showLineNumbers([\s\S]*?)```/);
+  return codeMatch ? codeMatch[1].trim() : '';
+}
+  ```
+</code></pre>
+
+### Parameters
+
+```
+- `content`: string - The string containing the Markdown-like content to parse for code blocks.
+
+```
+
+### Return Value
+
+- Type: `string `
+
+Returns the content of the matched code block. If no code block with showLineNumbers is found, an empty string is returned.
+
+### Usage Example
+
+```javascript
+import { extractCodeSection } from "./path/to/module";
+
+const markdownContent = `
+Some text before the code block.
+
+\`\`\`typescript showLineNumbers
+function add(a: number, b: number): number {
+  return a + b;
+}
+\`\`\`
+
+Some text after the code block.
+`;
+
+const extractedCode = extractCodeSection(markdownContent);
+console.log(extractedCode);
+
+// Output:
+// function add(a: number, b: number): number {
+//   return a + b;
+// }
+```

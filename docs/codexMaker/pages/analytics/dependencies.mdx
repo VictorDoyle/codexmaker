@@ -1,0 +1,47 @@
+# Function Dependencies
+
+This page provides a detailed analysis of how functions are interconnected and their influence on the codebase. By understanding these dependencies, developers can assess the potential ripple effects of changes and plan refactoring or testing strategies accordingly.
+
+**Key Insights**
+
+- Functions with high dependency scores are critical to the stability of the codebase and require careful consideration when modified.
+- Dependency analysis helps identify areas for decoupling to improve scalability and reduce regression risks.
+
+Below is a small preview of a Function Dependencies analysis from the codexmaker repository.
+
+## generateDocs
+
+### Impact Score: 5 (6 changes)
+
+#### Dependencies
+
+- **Calls**: `promptForProjectName`, `promptForGithubUsername`, `checkDependencies`, `generateNextraConfig`
+- **Called By**: `main`
+
+#### Change Impact
+
+When this function changes, these functions often need updates:
+
+- `checkDependencies` (6 times)
+
+  - Last change: 11/28/2024
+  - Reason: Merge pull request #4 from VictorDoyle/feature-codeTracker
+
+- `generateNextraConfig` (5 times)
+
+  - Last change: 11/28/2024
+  - Reason: Merge pull request #4 from VictorDoyle/feature-codeTracker
+
+- `scanDirectory` (4 times)
+
+  - Last change: 11/27/2024
+  - Reason: added multi lang support dynamic import
+
+- `scanFile` (4 times)
+
+  - Last change: 11/27/2024
+  - Reason: added multi lang support dynamic import
+
+- `getFunctionData` (4 times)
+  - Last change: 11/27/2024
+  - Reason: added multi lang support dynamic import

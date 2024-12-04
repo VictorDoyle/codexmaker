@@ -1,0 +1,33 @@
+# Change Patterns
+
+This page provides insights into how functions in the codebase change together. Understanding these co-change patterns is critical for improving dependency management, reducing regression risks, and prioritizing integration testing.
+
+**Key Insights**
+
+- Functions frequently modified together suggest potential coupling or shared dependencies.
+- Co-change patterns can inform architectural improvements, such as reducing tight coupling or isolating shared logic.
+
+Below is a small preview of a Change Patterns analysis from the codexmaker repository.
+
+## generateDocs Change Pattern
+
+- Total Changes: 6
+- Dependencies: 5
+
+### Common Other Functions Changed with generateDocs
+
+#### With `checkDependencies`
+
+- Changed together 6 times
+- Recent changes:
+  - 11/28/2024: Merge pull request #4 from VictorDoyle/feature-codeTracker
+  - 11/27/2024: added multi lang support dynamic import
+  - 11/27/2024: clearedup build
+
+#### With `generateNextraConfig`
+
+- Changed together 5 times
+- Recent changes:
+  - 11/28/2024: Merge pull request #4 from VictorDoyle/feature-codeTracker
+  - 11/27/2024: added multi lang support dynamic import
+  - 11/27/2024: clearedup build
