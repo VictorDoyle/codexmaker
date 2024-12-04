@@ -11,7 +11,8 @@
     "build": "tsc",
     "test": "npx generate-docs && cd docs && cd codexMaker && npm run dev",
     "prepare": "npm run build",
-    "destroy": "rm -rf docs"
+    "destroy": "rm -rf docs",
+    "build-docs": "cd docs/codexMaker && next build && next export"
   },
   "keywords": [
     "documentation",
