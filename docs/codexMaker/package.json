@@ -9,7 +9,7 @@
     "export": "next export"
   },
   "dependencies": {
-    "next": "^16.1.5",
+    "next": "^16.2.0",
     "nextra": "^4.4.0",
     "nextra-theme-docs": "^4.4.0",
     "react": "^18.2.0",
